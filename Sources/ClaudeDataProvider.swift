@@ -319,6 +319,9 @@ class ClaudeDataProvider: ObservableObject {
 
         guard let sid = sessionId else { return nil }
 
+        // Only include Claude Desktop sessions
+        guard entrypoint == "claude-desktop" else { return nil }
+
         // Read last lines for final context usage + message count
         var lastInputTokens = 0
         var lastCacheCreation = 0
