@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.contextbar.watcher</string>
+    <key>WatchPaths</key>
+    <array>
+        <string>/Users/momenmush/.claude/sessions</string>
+    </array>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>pgrep -f ClaudeContextBar.app/Contents/MacOS/ClaudeContextBar > /dev/null 2>&amp;1 || open /Applications/ClaudeContextBar.app</string>
+    </array>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
