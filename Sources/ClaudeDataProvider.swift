@@ -224,12 +224,6 @@ class ClaudeDataProvider: ObservableObject {
         var found: [RecentSession] = []
         let activeSessionIds = Set(sessions.map { $0.id })
 
-        // Only look for transcripts belonging to active sessions
-        guard !activeSessionIds.isEmpty else {
-            recentSessions = []
-            return
-        }
-
         for projectDir in projectDirs {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: projectDir.path, isDirectory: &isDir),
@@ -247,11 +241,15 @@ class ClaudeDataProvider: ObservableObject {
             for file in files {
                 guard file.pathExtension == "jsonl" else { continue }
 
-                // Only match active session IDs
+                // Skip subagent/plugin files
                 let filename = file.deletingPathExtension().lastPathComponent
-                guard activeSessionIds.contains(filename) else { continue }
+                if filename.hasPrefix("agent-") || filename == "skill-injections" { continue }
 
-                let modDate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
+                // Only transcripts updated in the last 24h
+                guard let attrs = try? file.resourceValues(forKeys: [.contentModificationDateKey]),
+                      let modDate = attrs.contentModificationDate,
+                      modDate > cutoff
+                else { continue }
 
                 if let session = parseTranscript(file, projectName: projectName, lastActivity: modDate, activeIds: activeSessionIds) {
                     found.append(session)
