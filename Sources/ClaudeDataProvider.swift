@@ -301,10 +301,11 @@ class ClaudeDataProvider: ObservableObject {
         var entrypoint = "unknown"
         var cwd = ""
         var startedAt: Date?
+        var sessionTitle: String?
         var messageCount = 0
         var totalCost: Double = 0
 
-        // Read first lines for metadata
+        // Read first lines for metadata + first user message as title
         for line in lines.prefix(15) {
             guard let jsonData = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
@@ -318,6 +319,11 @@ class ClaudeDataProvider: ObservableObject {
                 cwd = json["cwd"] as? String ?? ""
                 if let ts = json["timestamp"] as? String {
                     startedAt = parseISO8601(ts)
+                }
+                // First user message content = session title (matches Claude Desktop sidebar)
+                if let message = json["message"] as? [String: Any],
+                   let content = message["content"] as? String {
+                    sessionTitle = content
                 }
             }
         }
@@ -368,7 +374,7 @@ class ClaudeDataProvider: ObservableObject {
 
         return RecentSession(
             id: sid,
-            projectName: projectName,
+            projectName: sessionTitle ?? projectName,
             projectDir: cwd,
             entrypoint: entrypoint,
             startedAt: startedAt ?? lastActivity,
