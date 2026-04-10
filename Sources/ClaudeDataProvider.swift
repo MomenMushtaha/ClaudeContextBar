@@ -207,12 +207,22 @@ class ClaudeDataProvider: ObservableObject {
         )
     }
 
-    // MARK: - Recent Sessions (last 24h from transcripts)
+    // MARK: - Recent Sessions (from active Claude Desktop sessions)
 
     private func loadRecentSessions() {
         let projectsDir = homeDir.appendingPathComponent(".claude/projects")
-        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
 
+        // Only Claude Desktop sessions that are currently running
+        let desktopSessions = sessions.filter { $0.entrypoint == "claude-desktop" }
+        guard !desktopSessions.isEmpty else {
+            recentSessions = []
+            return
+        }
+
+        // Build a lookup: sessionId -> SessionInfo
+        let sessionMap = Dictionary(uniqueKeysWithValues: desktopSessions.map { ($0.id, $0) })
+
+        // Scan project dirs for matching transcript files
         guard let projectDirs = try? FileManager.default.contentsOfDirectory(
             at: projectsDir,
             includingPropertiesForKeys: nil
@@ -222,7 +232,7 @@ class ClaudeDataProvider: ObservableObject {
         }
 
         var found: [RecentSession] = []
-        let activeSessionIds = Set(sessions.map { $0.id })
+        var matchedIds = Set<String>()
 
         for projectDir in projectDirs {
             var isDir: ObjCBool = false
@@ -241,27 +251,22 @@ class ClaudeDataProvider: ObservableObject {
             for file in files {
                 guard file.pathExtension == "jsonl" else { continue }
 
-                // Skip subagent/plugin files
+                // Only match files named after an active Desktop session ID
                 let filename = file.deletingPathExtension().lastPathComponent
-                if filename.hasPrefix("agent-") || filename == "skill-injections" { continue }
+                guard sessionMap[filename] != nil, !matchedIds.contains(filename) else { continue }
 
-                // Only transcripts updated in the last 24h
-                guard let attrs = try? file.resourceValues(forKeys: [.contentModificationDateKey]),
-                      let modDate = attrs.contentModificationDate,
-                      modDate > cutoff
-                else { continue }
+                let modDate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
 
-                if let session = parseTranscript(file, projectName: projectName, lastActivity: modDate, activeIds: activeSessionIds) {
+                if let session = parseTranscript(file, projectName: projectName, lastActivity: modDate, activeIds: Set(sessionMap.keys)) {
                     found.append(session)
+                    matchedIds.insert(filename)
                 }
             }
         }
 
-        // Deduplicate: if we have live data for a session, use that instead
-        recentSessions = found
-            .sorted { $0.lastActivity > $1.lastActivity }
+        recentSessions = found.sorted { $0.lastActivity > $1.lastActivity }
 
-        // Override active session data with live data if available
+        // Override with live data for the current session
         if let live = liveData {
             if let idx = recentSessions.firstIndex(where: { $0.id == live.sessionId }) {
                 let old = recentSessions[idx]
