@@ -207,22 +207,14 @@ class ClaudeDataProvider: ObservableObject {
         )
     }
 
-    // MARK: - Recent Sessions (from active Claude Desktop sessions)
+    // MARK: - Recent Sessions (Claude Desktop, last 24h, meaningful only)
 
     private func loadRecentSessions() {
         let projectsDir = homeDir.appendingPathComponent(".claude/projects")
+        let cutoff24h = Date().addingTimeInterval(-24 * 60 * 60)
+        let activeSessionIds = Set(sessions.map { $0.id })
+        let minFileSize = 10_000 // Skip tiny transcripts (stale "hi" sessions are ~2KB)
 
-        // Only Claude Desktop sessions that are currently running
-        let desktopSessions = sessions.filter { $0.entrypoint == "claude-desktop" }
-        guard !desktopSessions.isEmpty else {
-            recentSessions = []
-            return
-        }
-
-        // Build a lookup: sessionId -> SessionInfo
-        let sessionMap = Dictionary(uniqueKeysWithValues: desktopSessions.map { ($0.id, $0) })
-
-        // Scan project dirs for matching transcript files
         guard let projectDirs = try? FileManager.default.contentsOfDirectory(
             at: projectsDir,
             includingPropertiesForKeys: nil
@@ -232,7 +224,7 @@ class ClaudeDataProvider: ObservableObject {
         }
 
         var found: [RecentSession] = []
-        var matchedIds = Set<String>()
+        var seenIds = Set<String>()
 
         for projectDir in projectDirs {
             var isDir: ObjCBool = false
@@ -245,21 +237,29 @@ class ClaudeDataProvider: ObservableObject {
 
             guard let files = try? FileManager.default.contentsOfDirectory(
                 at: projectDir,
-                includingPropertiesForKeys: [.contentModificationDateKey]
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey]
             ) else { continue }
 
             for file in files {
                 guard file.pathExtension == "jsonl" else { continue }
 
-                // Only match files named after an active Desktop session ID
                 let filename = file.deletingPathExtension().lastPathComponent
-                guard sessionMap[filename] != nil, !matchedIds.contains(filename) else { continue }
+                if filename.hasPrefix("agent-") || filename == "skill-injections" { continue }
 
-                let modDate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? Date()
+                // Modified in last 24h
+                guard let attrs = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let modDate = attrs.contentModificationDate,
+                      modDate > cutoff24h,
+                      let fileSize = attrs.fileSize,
+                      fileSize > minFileSize
+                else { continue }
 
-                if let session = parseTranscript(file, projectName: projectName, lastActivity: modDate, activeIds: Set(sessionMap.keys)) {
+                // Deduplicate by session ID
+                guard !seenIds.contains(filename) else { continue }
+
+                if let session = parseTranscript(file, projectName: projectName, lastActivity: modDate, activeIds: activeSessionIds) {
                     found.append(session)
-                    matchedIds.insert(filename)
+                    seenIds.insert(session.id)
                 }
             }
         }
