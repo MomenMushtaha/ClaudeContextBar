@@ -89,19 +89,30 @@ class ClaudeDataProvider: ObservableObject {
     private var lastFullScan: Date = .distantPast
 
     var contextUsedPercentage: Int {
-        liveData?.contextWindow.usedPercentage ?? 0
+        // Use most recently active session's data (first in sorted list)
+        if let top = recentSessions.first {
+            return top.usedPercentage
+        }
+        return liveData?.contextWindow.usedPercentage ?? 0
+    }
+
+    var contextRemainingPercentage: Int {
+        if let top = recentSessions.first {
+            return top.remainingPercentage
+        }
+        return liveData?.contextWindow.remainingPercentage ?? 0
     }
 
     var hasActiveSession: Bool {
-        !sessions.isEmpty && liveData != nil
+        !recentSessions.isEmpty || (!sessions.isEmpty && liveData != nil)
     }
 
     func refresh() {
         loadSessions()
         loadLiveData()
 
-        // Full transcript scan every 10s (heavier operation)
-        if Date().timeIntervalSince(lastFullScan) > 10 {
+        // Full transcript scan every 5s
+        if Date().timeIntervalSince(lastFullScan) > 5 {
             loadRecentSessions()
             lastFullScan = Date()
         }
@@ -333,11 +344,12 @@ class ClaudeDataProvider: ObservableObject {
         // Only include Claude Desktop sessions
         guard entrypoint == "claude-desktop" else { return nil }
 
-        // Read last lines for final context usage + message count
+            // Read last lines for final context usage + message count
         var lastInputTokens = 0
         var lastCacheCreation = 0
         var lastCacheRead = 0
         var lastOutputTokens = 0
+        var modelId = ""
 
         for line in lines.suffix(30).reversed() {
             guard let jsonData = line.data(using: .utf8),
@@ -353,7 +365,7 @@ class ClaudeDataProvider: ObservableObject {
                 messageCount = max(messageCount, mc)
             }
 
-            // Get last assistant usage
+            // Get last assistant usage + model
             if msgType == "assistant", lastCacheRead == 0 {
                 if let message = json["message"] as? [String: Any],
                    let usage = message["usage"] as? [String: Any] {
@@ -361,6 +373,7 @@ class ClaudeDataProvider: ObservableObject {
                     lastCacheCreation = usage["cache_creation_input_tokens"] as? Int ?? 0
                     lastCacheRead = usage["cache_read_input_tokens"] as? Int ?? 0
                     lastOutputTokens = usage["output_tokens"] as? Int ?? 0
+                    modelId = message["model"] as? String ?? ""
                 }
             }
 
@@ -368,7 +381,8 @@ class ClaudeDataProvider: ObservableObject {
         }
 
         let totalTokens = lastInputTokens + lastCacheCreation + lastCacheRead + lastOutputTokens
-        let contextSize = 1_000_000
+        // Opus models have 1M context, others 200K
+        let contextSize = modelId.contains("opus") ? 1_000_000 : 200_000
         let usedPct = contextSize > 0 ? min(totalTokens * 100 / contextSize, 100) : 0
         let isActive = activeIds.contains(sid)
 
